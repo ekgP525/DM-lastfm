@@ -1,6 +1,6 @@
 # Last.fm 음악 추천 — 랜덤워크 추천의 인기 편향 측정과 보정
 
-SCE331 Data Mining (2026-2) Team 10
+SCE331 Data Mining (2026-2) Group 10
 
 ## Overview
 
