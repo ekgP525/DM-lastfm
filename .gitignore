@@ -1,0 +1,15 @@
+# data (비상업적 라이선스, 재배포 금지)
+data/raw/*
+!data/raw/.gitkeep
+
+# results
+results/*
+!results/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.ipynb_checkpoints/
+.DS_Store
