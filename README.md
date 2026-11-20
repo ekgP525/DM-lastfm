@@ -48,7 +48,6 @@ pytest -q
 ```
 
 - 개발 확인 환경: Python 3.13, numpy 2.5, scipy 1.18, pandas 3.0
-- 실제 데이터 실행 확인(2026-11-20): Python 3.9.6, numpy 2.0.2, scipy 1.13.1, pandas 2.3.3, matplotlib 3.9.4 (macOS)
 - 최종 실험 환경(CPU, 메모리)은 results/metrics_*.json의 env 필드와 함께 여기에 기록
 
 ## Data sources and acquisition
