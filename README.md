@@ -98,6 +98,22 @@ python scripts/run_experiment.py --method rwr --stage test --params '{"restart":
 - seed: 0, 1, 2, 3, 4 (분할과 모델 난수 모두)
 - 분할: 사용자별 test 20%, 나머지 중 validation 10%
 
+### 확정 하이퍼파라미터
+
+seed 0 validation NDCG@10(all) 최대 기준으로 고르고 나머지 seed에 고정.
+
+| 방법 | 값 | 탐색 범위와 근거 |
+| --- | --- | --- |
+| MF | `{"n_factors": 256, "reg": 0.1, "neg_ratio": 12, "lr": 0.01, "epochs": 120}` | 1차(epochs 30): n_factors {16, 32, 64, 128} × reg {0.01, 0.05, 0.1} × neg_ratio {1, 3, 5} × lr {0.005, 0.01, 0.02}. 최적이 범위 끝이라 2차(lr 0.01): n_factors {128, 256} × reg {0.1, 0.2, 0.4} × neg_ratio {5, 8, 12}. epochs {20, 30, 50, 80, 120, 200}, epochs 120에서 reg {0.05, 0.1, 0.2} 재확인. 상위 조합 간 NDCG 차이(≤0.003)는 seed 하나의 변동 폭 수준 |
+
+```bash
+python scripts/tune.py --method mf --tag _grid1 --grid '{"n_factors": [16, 32, 64, 128], "reg": [0.01, 0.05, 0.1], "neg_ratio": [1, 3, 5], "lr": [0.005, 0.01, 0.02]}'
+python scripts/tune.py --method mf --tag _grid2 --fixed '{"lr": 0.01}' --grid '{"n_factors": [128, 256], "reg": [0.1, 0.2, 0.4], "neg_ratio": [5, 8, 12]}'
+python scripts/tune.py --method mf --tag _epochs --fixed '{"lr": 0.01, "n_factors": 256, "reg": 0.1, "neg_ratio": 12}' --grid '{"epochs": [20, 30, 50, 80, 120, 200]}'
+python scripts/tune.py --method mf --tag _reg_e120 --fixed '{"lr": 0.01, "n_factors": 256, "neg_ratio": 12, "epochs": 120}' --grid '{"reg": [0.05, 0.1, 0.2]}'
+python scripts/run_experiment.py --method mf --stage val --params '{"n_factors": 256, "reg": 0.1, "neg_ratio": 12, "lr": 0.01, "epochs": 120}' --tag _final
+```
+
 ## Evaluation
 
 - Recall@10, NDCG@10: 사용자 평균, seed 5개 평균 ± 표준편차
