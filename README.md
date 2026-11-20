@@ -22,6 +22,7 @@ SCE331 Data Mining (2026-2) Group 10
 scripts/
   download_data.py     데이터 다운로드, 압축 해제, 접근일·sha256 기록
   data_stats.py        보고서 데이터 장용 통계 → results/data_stats.json
+  eda_figures.py       데이터 장 EDA 그림·수치 → results/figures/fig_data.{pdf,png}, results/eda_stats.json
   run_experiment.py    방법 × seed 실행 → results/metrics_*.json, per_user_*.csv
 src/lastfm_rec/
   data.py              로딩, log(1+plays), 사용자 필터, ID 인코딩, 친구·태그 인코딩
@@ -47,6 +48,7 @@ pytest -q
 ```
 
 - 개발 확인 환경: Python 3.13, numpy 2.5, scipy 1.18, pandas 3.0
+- 실제 데이터 실행 확인(2026-11-20): Python 3.9.6, numpy 2.0.2, scipy 1.13.1, pandas 2.3.3, matplotlib 3.9.4 (macOS)
 - 최종 실험 환경(CPU, 메모리)은 results/metrics_*.json의 env 필드와 함께 여기에 기록
 
 ## Data sources and acquisition
@@ -64,6 +66,8 @@ python scripts/download_data.py   # data/raw/hetrec2011-lastfm-2k/, data/raw/ACC
 - 아티스트 5명 미만 사용자 제외
 - 태그: 연도 2005~2011 범위 밖 행 제거, 평가 쌍(같은 사용자–같은 아티스트)에 달린 태그는 그래프에서 제외
 - 필터 전후 규모: `python scripts/data_stats.py`
+- EDA 그림(롱테일, 사용자당 아티스트 수, 청취 횟수, 친구 수): `python scripts/eda_figures.py`
+- 사용자당 아티스트 수 상한이 50(사용자 97%가 정확히 50) → 사용자별 상위 50명만 남긴 절단 데이터로 보고 한계에 기재
 
 ## Algorithms
 
