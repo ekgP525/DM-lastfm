@@ -1,5 +1,6 @@
-numpy>=2.0
-scipy>=1.13
-pandas>=2.2
-matplotlib>=3.8
-pytest>=8.0
+# 결과 재현을 위해 버전을 고정한다 (Python 3.13.15에서 확인, 2026-11-20)
+numpy==2.5.5
+scipy==1.18.1
+pandas==3.1.1
+matplotlib==3.11.2
+pytest==9.2.0
