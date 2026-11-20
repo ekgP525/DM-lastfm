@@ -35,18 +35,22 @@ src/lastfm_rec/
 tests/                 분할·leakage·지표 단위 테스트
 data/raw/              원본 데이터(커밋하지 않음)
 results/               실행 결과(커밋하지 않음)
-notebooks/             EDA, 그림
+notebooks/             EDA, 그림, colab_run.ipynb(Colab 실행용)
 ```
 
 ## Environment / setup
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+# Python 3.13 (.python-version). uv가 있으면: uv venv --python 3.13 .venv
+python3.13 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q
 ```
 
-- 개발 확인 환경: Python 3.13, numpy 2.5, scipy 1.18, pandas 3.0
+- requirements.txt는 버전을 고정함(Python 3.13.15, numpy 2.5.5, scipy 1.18.1, pandas 3.1.1, matplotlib 3.11.2). 모든 팀원이 같은 버전으로 실행
+- macOS 기본 Python 3.9(numpy 2.0.x)에서는 행렬곱에 근거 없는 RuntimeWarning이 나옴 → 3.13 사용
+- 로컬 설정이 어려우면 Colab: `notebooks/colab_run.ipynb` (레포 클론 → 고정 버전 설치 → 데이터 다운로드 → 스크립트 실행)
+- 최종 `--stage test`는 한 기계에서 일괄 실행(계획서 기준 B)
 - 최종 실험 환경(CPU, 메모리)은 results/metrics_*.json의 env 필드와 함께 여기에 기록
 
 ## Data sources and acquisition
