@@ -23,6 +23,7 @@ scripts/
   download_data.py     데이터 다운로드, 압축 해제, 접근일·sha256 기록
   data_stats.py        보고서 데이터 장용 통계 → results/data_stats.json
   run_experiment.py    방법 × seed 실행 → results/metrics_*.json, per_user_*.csv
+  tune.py              seed 0 validation 그리드 탐색 → results/tune_*.csv
 src/lastfm_rec/
   data.py              로딩, log(1+plays), 사용자 필터, ID 인코딩, 친구·태그 인코딩
   split.py             사용자별 train/val/test 분할(seed 고정)
@@ -31,7 +32,7 @@ src/lastfm_rec/
   models/
     base.py            Recommender 인터페이스(fit, score, recommend)
     baselines.py       인기도 순, 무작위
-    stubs.py           ItemCF, MinHashLSH, MF, RWR (구현 예정)
+    stubs.py           ItemCF, MinHashLSH, RWR (구현 예정), MF (구현 완료)
 tests/                 분할·leakage·지표 단위 테스트
 data/raw/              원본 데이터(커밋하지 않음)
 results/               실행 결과(커밋하지 않음)
@@ -88,6 +89,7 @@ python scripts/download_data.py   # data/raw/hetrec2011-lastfm-2k/, data/raw/ACC
 # 하이퍼파라미터 선택: train으로 학습, validation으로 평가
 python scripts/run_experiment.py --method popularity --stage val
 python scripts/run_experiment.py --method rwr --stage val --params '{"restart": 0.3, "beta": 0.0}' --tag _c03
+python scripts/tune.py --method mf --grid '{"n_factors": [16, 32, 64], "reg": [0.01, 0.05]}'
 
 # 최종 평가: train+val로 학습, test로 평가 (확정한 값으로 한 번)
 python scripts/run_experiment.py --method rwr --stage test --params '{"restart": 0.3, "beta": 0.5}'

@@ -5,6 +5,8 @@ score(users)가 (len(users), n_items) 점수 행렬을 반환하면 run_experime
 """
 from __future__ import annotations
 
+import numpy as np
+
 from .base import Recommender
 
 
@@ -38,20 +40,72 @@ class MinHashLSH:
 
 class MF(Recommender):
     """DM_10 Recom2. bias 포함 regularized MF를 SGD로 직접 구현.
-    관측 쌍(w) + 사용자별로 샘플링한 미관측 쌍(0, 관측 수의 neg_ratio배)으로 학습."""
+    관측 쌍(w) + 사용자별로 샘플링한 미관측 쌍(0, 관측 수의 neg_ratio배)으로 학습.
+
+    예측 r_ui = mu + b_u + b_i + p_u · q_i, 손실 = 제곱 오차 + reg * (b_u² + b_i² + |p_u|² + |q_i|²).
+    미관측 쌍은 epoch마다 균등 샘플링으로 새로 뽑고, 학습 데이터에 있는 쌍은 다시 뽑는다.
+    갱신은 batch_size개씩 묶어 numpy로 처리한다(배치 안에서는 같은 파라미터로 기울기를 계산하는 미니배치 SGD)."""
     name = "mf"
 
     def __init__(self, n_factors: int = 32, lr: float = 0.01, reg: float = 0.05,
-                 epochs: int = 30, neg_ratio: int = 3, seed: int = 0):
+                 epochs: int = 30, neg_ratio: int = 3, seed: int = 0, batch_size: int = 1024,
+                 init_std: float = 0.1):
         self.__dict__.update(n_factors=n_factors, lr=lr, reg=reg, epochs=epochs,
-                             neg_ratio=neg_ratio, seed=seed)
+                             neg_ratio=neg_ratio, seed=seed, batch_size=batch_size, init_std=init_std)
 
     def fit(self, fit_df, n_users, n_items):
         super().fit(fit_df, n_users, n_items)
-        raise NotImplementedError("행렬 담당")
+        rng = np.random.default_rng(self.seed)
+        u_obs = fit_df["u"].to_numpy(dtype=np.int64)
+        i_obs = fit_df["i"].to_numpy(dtype=np.int64)
+        w_obs = fit_df["w"].to_numpy(dtype=float)
+        self._seen_keys = np.unique(u_obs * n_items + i_obs)
+
+        self.P = rng.normal(0.0, self.init_std, (n_users, self.n_factors))
+        self.Q = rng.normal(0.0, self.init_std, (n_items, self.n_factors))
+        self.bu = np.zeros(n_users)
+        self.bi = np.zeros(n_items)
+        # 관측 + 미관측(0) 전체 학습 목표값의 평균
+        self.mu = float(w_obs.sum() / (len(w_obs) * (1 + self.neg_ratio)))
+
+        self.rmse_history = []
+        for _ in range(self.epochs):
+            u_neg, i_neg = self._sample_negatives(u_obs, rng)
+            u = np.concatenate([u_obs, u_neg])
+            i = np.concatenate([i_obs, i_neg])
+            y = np.concatenate([w_obs, np.zeros(len(u_neg))])
+            order = rng.permutation(len(u))
+            sq = 0.0
+            for s in range(0, len(order), self.batch_size):
+                idx = order[s:s + self.batch_size]
+                sq += self._step(u[idx], i[idx], y[idx])
+            self.rmse_history.append(float(np.sqrt(sq / len(u))))
+        return self
+
+    def _sample_negatives(self, u_obs, rng):
+        """사용자별 관측 수 × neg_ratio개의 미관측 아티스트. 학습 쌍과 겹치면 다시 뽑는다."""
+        u_neg = np.repeat(u_obs, self.neg_ratio)
+        i_neg = rng.integers(0, self.n_items, len(u_neg))
+        bad = np.isin(u_neg * self.n_items + i_neg, self._seen_keys)
+        while bad.any():
+            i_neg[bad] = rng.integers(0, self.n_items, int(bad.sum()))
+            bad[bad] = np.isin(u_neg[bad] * self.n_items + i_neg[bad], self._seen_keys)
+        return u_neg, i_neg
+
+    def _step(self, u, i, y) -> float:
+        pu, qi = self.P[u], self.Q[i]
+        err = y - (self.mu + self.bu[u] + self.bi[i] + np.einsum("ij,ij->i", pu, qi))
+        lr, reg = self.lr, self.reg
+        # 같은 사용자·아티스트가 배치에 여러 번 나오면 np.add.at으로 갱신을 누적한다
+        np.add.at(self.bu, u, lr * (err - reg * self.bu[u]))
+        np.add.at(self.bi, i, lr * (err - reg * self.bi[i]))
+        np.add.at(self.P, u, lr * (err[:, None] * qi - reg * pu))
+        np.add.at(self.Q, i, lr * (err[:, None] * pu - reg * qi))
+        return float(err @ err)
 
     def score(self, users):
-        raise NotImplementedError
+        users = np.asarray(users)
+        return self.mu + self.bu[users, None] + self.bi[None, :] + self.P[users] @ self.Q.T
 
 
 class RWR(Recommender):
