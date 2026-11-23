@@ -53,8 +53,11 @@ def main() -> None:
         t0 = time.perf_counter()
         model.fit(fit_df, enc.n_users, enc.n_items)
         t_fit = time.perf_counter() - t0
-        summ, _ = evaluate(model.recommend(users, k=args.k), eval_df, fit_df, enc.n_items, k=args.k)
-        rows.append({**params, **summ, "fit_sec": t_fit})
+        t0 = time.perf_counter()
+        recs = model.recommend(users, k=args.k)
+        t_rec = time.perf_counter() - t0  # 평가 사용자 전체 추천 시간
+        summ, _ = evaluate(recs, eval_df, fit_df, enc.n_items, k=args.k)
+        rows.append({**params, **summ, "fit_sec": t_fit, "rec_sec": t_rec})
         # 중간에 멈춰도 결과가 남도록 매번 저장
         pd.DataFrame(rows).to_csv(path, index=False)
         print(f"[{n}/{len(combos)}] {params} ndcg@{args.k}={summ[f'ndcg@{args.k}']:.4f} "
