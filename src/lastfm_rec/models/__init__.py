@@ -1,6 +1,6 @@
 from .base import Recommender
 from .baselines import Popularity, RandomRec
-from .stubs import MF, RWR, ItemCF, MinHashLSH
+from .stubs import MF, P3, RWR, ItemCF, MinHashLSH
 
 REGISTRY = {
     "popularity": lambda seed, **kw: Popularity(),
@@ -8,6 +8,8 @@ REGISTRY = {
     "itemcf": lambda seed, **kw: ItemCF(**kw),
     "mf": lambda seed, **kw: MF(seed=seed, **kw),
     "rwr": lambda seed, **kw: RWR(**kw),
+    "p3": lambda seed, **kw: P3(**kw),
 }
 
-__all__ = ["Recommender", "Popularity", "RandomRec", "ItemCF", "MinHashLSH", "MF", "RWR", "REGISTRY"]
+__all__ = ["Recommender", "Popularity", "RandomRec", "ItemCF", "MinHashLSH", "MF", "RWR", "P3",
+           "REGISTRY"]

@@ -6,7 +6,9 @@ score(users)가 (len(users), n_items) 점수 행렬을 반환하면 run_experime
 from __future__ import annotations
 
 import numpy as np
+import scipy.sparse as sp
 
+from ..graph import build_graph, column_stochastic
 from .base import Recommender
 
 
@@ -121,7 +123,73 @@ class RWR(Recommender):
 
     def fit(self, fit_df, n_users, n_items):
         super().fit(fit_df, n_users, n_items)
-        raise NotImplementedError("그래프 담당")
+        if self.graph != "G1":
+            raise NotImplementedError("G2·G3는 친구·태그 입력 연결 후 지원")
+        A = build_graph(fit_df, n_users, n_items)
+        self.M = column_stochastic(A)
+        self.n_nodes = A.shape[0]
+        # 아티스트별 학습 청취자 수 (인기도 보정·분석용, 학습 데이터만 사용)
+        self.popularity = np.bincount(fit_df["i"].to_numpy(dtype=np.int64), minlength=n_items)
+        self.n_iter_ = []
+        return self
+
+    def _propagate(self, users) -> np.ndarray:
+        """사용자별 RWR 정상 분포. (노드 수, len(users)) 행렬, 각 열이 한 사용자."""
+        users = np.asarray(users, dtype=np.int64)
+        c = self.restart
+        E = np.zeros((self.n_nodes, len(users)))
+        E[users, np.arange(len(users))] = 1.0
+        R = E.copy()
+        for it in range(1, self.max_iter + 1):
+            R_new = (1.0 - c) * (self.M @ R) + c * E
+            delta = np.abs(R_new - R).sum(axis=0).max()  # 열(사용자)별 L1 변화 중 최대
+            R = R_new
+            if delta < self.tol:
+                break
+        self.n_iter_.append(it)
+        return R
 
     def score(self, users):
-        raise NotImplementedError
+        R = self._propagate(users)
+        sc = R[self.n_users:self.n_users + self.n_items].T  # 아티스트 노드 구간만
+        if self.beta > 0:
+            sc = sc / (self.popularity + 1.0) ** self.beta
+        return sc
+
+
+class P3(Recommender):
+    """P3α / RP3β baseline (Dacrema et al. 2019, 2.2절의 정의를 따름).
+    사용자 → 아티스트 → 사용자 → 아티스트 3걸음 전이확률로 점수를 매긴다.
+    전이확률은 RWR과 같은 가중치 w로 p_ui = (w_ui / Σ_i w_ui)^α, p_iu = (w_ui / Σ_u w_ui)^α.
+    beta > 0이면 RWR과 똑같이 (학습 청취자 수 + 1)^beta로 나눈다(β = 0이면 P3α, β > 0이면 RP3β).
+    원 구현의 아이템 이웃 top-K 자르기는 하지 않는다(전체 3걸음 확률 사용)."""
+    name = "p3"
+
+    def __init__(self, alpha: float = 1.0, beta: float = 0.0):
+        self.alpha, self.beta = alpha, beta
+
+    def fit(self, fit_df, n_users, n_items):
+        super().fit(fit_df, n_users, n_items)
+        u = fit_df["u"].to_numpy(dtype=np.int64)
+        i = fit_df["i"].to_numpy(dtype=np.int64)
+        w = fit_df["w"].to_numpy(dtype=float)
+        X = sp.csr_matrix((w, (u, i)), shape=(n_users, n_items))
+        X.sum_duplicates()
+        row = np.asarray(X.sum(axis=1)).ravel()
+        col = np.asarray(X.sum(axis=0)).ravel()
+        self.P_ui = (sp.diags(np.divide(1.0, row, out=np.zeros_like(row), where=row > 0)) @ X).tocsr()
+        self.P_iu = (X @ sp.diags(np.divide(1.0, col, out=np.zeros_like(col), where=col > 0))).T.tocsr()
+        if self.alpha != 1.0:
+            self.P_ui = self.P_ui.power(self.alpha)
+            self.P_iu = self.P_iu.power(self.alpha)
+        self.popularity = np.bincount(i, minlength=n_items)
+        return self
+
+    def score(self, users):
+        users = np.asarray(users, dtype=np.int64)
+        first = self.P_ui[users]                        # (b, 아티스트) 1걸음
+        second = (first @ self.P_iu).toarray()          # (b, 사용자) 2걸음
+        sc = np.asarray(self.P_ui.T @ second.T).T       # (b, 아티스트) 3걸음
+        if self.beta > 0:
+            sc = sc / (self.popularity + 1.0) ** self.beta
+        return sc
