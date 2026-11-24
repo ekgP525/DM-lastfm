@@ -59,7 +59,14 @@ class ItemCF(Recommender):
         return sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=sim.shape)
 
     def score(self, users):
-        raise NotImplementedError
+        Xu = self.X[np.asarray(users)]
+        sc = (Xu @ self.S.T).toarray()
+        if self.normalize:
+            heard = Xu.copy()
+            heard.data[:] = 1.0
+            den = (heard @ self.S.T).toarray()
+            sc = np.divide(sc, den, out=np.zeros_like(sc), where=den > 0)
+        return sc
 
 
 class MinHashLSH:
