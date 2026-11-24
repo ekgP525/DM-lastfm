@@ -36,7 +36,7 @@ src/lastfm_rec/
   models/
     base.py            Recommender 인터페이스(fit, score, recommend)
     baselines.py       인기도 순, 무작위
-    stubs.py           ItemCF, MinHashLSH, RWR (구현 예정), MF (구현 완료)
+    stubs.py           ItemCF(구현 완료), MinHashLSH, RWR (구현 예정), MF (구현 완료)
 tests/                 분할·leakage·지표 단위 테스트
 data/raw/              원본 데이터(커밋하지 않음)
 results/               실행 결과(커밋하지 않음)
@@ -111,6 +111,7 @@ seed 0 validation NDCG@10(all) 최대 기준으로 고르고 나머지 seed에 �
 | 방법 | 값 | 탐색 범위와 근거 |
 | --- | --- | --- |
 | MF | `{"n_factors": 256, "reg": 0.1, "neg_ratio": 12, "lr": 0.01, "epochs": 120}` | 1차(epochs 30): n_factors {16, 32, 64, 128} × reg {0.01, 0.05, 0.1} × neg_ratio {1, 3, 5} × lr {0.005, 0.01, 0.02}. 최적이 범위 끝이라 2차(lr 0.01): n_factors {128, 256} × reg {0.1, 0.2, 0.4} × neg_ratio {5, 8, 12}. epochs {20, 30, 50, 80, 120, 200}, epochs 120에서 reg {0.05, 0.1, 0.2} 재확인. 상위 조합 간 NDCG 차이(≤0.003)는 seed 하나의 변동 폭 수준 |
+| Item-CF | `{"n_neighbors": 2000}` | 1차: n_neighbors {5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 500, 1000}. 최적이 범위 끝이라 2차: {1000, 1500, 2000, 3000, 5000, 10000, 20000}. k ≥ 5000은 결과가 같음(유사도가 0이 아닌 이웃이 5000개 미만이라 자르지 않음). k=2000과 전체 사용의 차이 0.0003, seed 간 표준편차 0.0022 수준. k가 커질수록 coverage가 줄고 평균 인기도가 오름 |
 
 ```bash
 python scripts/tune.py --method mf --tag _grid1 --grid '{"n_factors": [16, 32, 64, 128], "reg": [0.01, 0.05, 0.1], "neg_ratio": [1, 3, 5], "lr": [0.005, 0.01, 0.02]}'
@@ -118,6 +119,9 @@ python scripts/tune.py --method mf --tag _grid2 --fixed '{"lr": 0.01}' --grid '{
 python scripts/tune.py --method mf --tag _epochs --fixed '{"lr": 0.01, "n_factors": 256, "reg": 0.1, "neg_ratio": 12}' --grid '{"epochs": [20, 30, 50, 80, 120, 200]}'
 python scripts/tune.py --method mf --tag _reg_e120 --fixed '{"lr": 0.01, "n_factors": 256, "neg_ratio": 12, "epochs": 120}' --grid '{"reg": [0.05, 0.1, 0.2]}'
 python scripts/run_experiment.py --method mf --stage val --params '{"n_factors": 256, "reg": 0.1, "neg_ratio": 12, "lr": 0.01, "epochs": 120}' --tag _final
+python scripts/tune.py --method itemcf --tag _k1 --grid '{"n_neighbors": [5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 500, 1000]}'
+python scripts/tune.py --method itemcf --tag _k2 --grid '{"n_neighbors": [1000, 1500, 2000, 3000, 5000, 10000, 20000]}'
+python scripts/run_experiment.py --method itemcf --stage val --params '{"n_neighbors": 2000}' --tag _final
 ```
 
 ## Evaluation
