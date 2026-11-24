@@ -17,12 +17,46 @@ class ItemCF(Recommender):
     neighbor_fn을 주면 그 함수가 고른 후보 안에서만 이웃을 찾는다(MinHash-LSH 근사 이웃)."""
     name = "itemcf"
 
-    def __init__(self, n_neighbors: int = 50, neighbor_fn=None):
-        self.n_neighbors, self.neighbor_fn = n_neighbors, neighbor_fn
+    def __init__(self, n_neighbors: int = 50, neighbor_fn=None, normalize: bool = False):
+        self.n_neighbors, self.neighbor_fn, self.normalize = n_neighbors, neighbor_fn, normalize
 
     def fit(self, fit_df, n_users, n_items):
         super().fit(fit_df, n_users, n_items)
-        raise NotImplementedError("행렬 담당: 코사인 유사도 + top-n 이웃")
+        if self.neighbor_fn is not None:
+            raise NotImplementedError("MinHash-LSH 근사 이웃은 feat/chaeyeon/minhash-lsh에서 구현")
+
+        # 1) 사용자×아티스트 행렬 X. 값은 w = log(1 + plays), fit_df(학습 부분)만 사용
+        u = fit_df["u"].to_numpy(dtype=np.int64)
+        i = fit_df["i"].to_numpy(dtype=np.int64)
+        w = fit_df["w"].to_numpy(dtype=float)
+        self.X = sp.csr_matrix((w, (u, i)), shape=(n_users, n_items))
+
+        # 2) 아티스트 열을 길이 1로 맞춘 뒤 Xn^T Xn = 아티스트끼리 코사인 유사도
+        norms = np.sqrt(np.asarray(self.X.power(2).sum(axis=0)).ravel())
+        inv = np.divide(1.0, norms, out=np.zeros_like(norms), where=norms > 0)
+        Xn = (self.X @ sp.diags(inv)).tocsc()
+        sim = (Xn.T @ Xn).tocsr()
+        sim.setdiag(0.0)
+        sim.eliminate_zeros()
+
+        # 3) 아티스트마다 유사도 상위 n_neighbors개만 남긴다. S[i, j] = i의 이웃 j의 유사도
+        self.S = self._keep_top_k(sim, self.n_neighbors)
+        return self
+
+    @staticmethod
+    def _keep_top_k(sim, k):
+        """희소 행렬의 각 행에서 값이 큰 k개만 남긴다."""
+        rows, cols, vals = [], [], []
+        for r in range(sim.shape[0]):
+            s, e = sim.indptr[r], sim.indptr[r + 1]
+            idx, val = sim.indices[s:e], sim.data[s:e]
+            if len(val) > k:
+                top = np.argpartition(-val, k - 1)[:k]
+                idx, val = idx[top], val[top]
+            rows.append(np.full(len(idx), r))
+            cols.append(idx)
+            vals.append(val)
+        return sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=sim.shape)
 
     def score(self, users):
         raise NotImplementedError
