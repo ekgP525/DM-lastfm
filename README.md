@@ -25,11 +25,13 @@ scripts/
   eda_figures.py       데이터 장 EDA 그림·수치 → results/figures/fig_data.{pdf,png}, results/eda_stats.json
   run_experiment.py    방법 × seed 실행 → results/metrics_*.json, per_user_*.csv
   tune.py              seed 0 validation 그리드 탐색 → results/tune_*.csv
+  make_tables.py       방법 간 비교 표(평균 ± 표준편차) → results/tables/compare_{val,test}.{md,csv}
 src/lastfm_rec/
   data.py              로딩, log(1+plays), 사용자 필터, ID 인코딩, 친구·태그 인코딩
   split.py             사용자별 train/val/test 분할(seed 고정)
   graph.py             학습 데이터만으로 RWR 그래프 구성(G1/G2/G3), 전이 행렬
   metrics.py           Recall@K, NDCG@K, coverage, 평균 인기도, tail 비율, paired bootstrap
+  tables.py            metrics_*.json → 비교 표, 실행 조건(K, seed, 평가 사용자 수) 일치 확인
   models/
     base.py            Recommender 인터페이스(fit, score, recommend)
     baselines.py       인기도 순, 무작위
@@ -126,7 +128,12 @@ python scripts/run_experiment.py --method mf --stage val --params '{"n_factors":
 
 ## Reproducing tables / figures
 
-- 표·그림 생성 순서는 구현 완료 후 기재
+```bash
+# 방법 간 비교 표: 이름=결과 파일 이름(metrics_<이름>_<stage>.json). 없는 파일은 건너뜀
+python scripts/make_tables.py --stage val --runs Random=random Popularity=popularity MF=mf_final
+```
+
+- 그림 생성 순서는 구현 완료 후 기재
 
 ## References and external code
 
