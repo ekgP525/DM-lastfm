@@ -62,3 +62,61 @@ def to_markdown(df: pd.DataFrame, k: int, decimals: int = 4) -> str:
         cells += [f"{r['Fit sec']:.1f}", f"{r['Rec ms/user']:.2f}"]
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
+
+
+def verdict(ci_lows: list[float], ci_highs: list[float], a: str, b: str) -> str:
+    """seed별 신뢰구간을 하나의 판정으로 묶는다. 모든 seed가 같은 방향이어야 차이로 본다."""
+    if all(lo > 0 for lo in ci_lows):
+        return f"{a} > {b}"
+    if all(hi < 0 for hi in ci_highs):
+        return f"{a} < {b}"
+    if all(lo <= 0 <= hi for lo, hi in zip(ci_lows, ci_highs)):
+        return "차이 없음"
+    return "혼재"
+
+
+def bootstrap_pairs(per_user: dict[str, dict[int, pd.DataFrame]], pairs: list[tuple[str, str]],
+                    metrics: tuple[str, ...] = ("ndcg", "recall"), n_boot: int = 2000
+                    ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """per_user[방법][seed] = 사용자별 점수(index u). seed마다 paired bootstrap(난수 seed = 분할 seed).
+
+    반환: (seed별 상세, 쌍·지표별 요약, 경고 문장들)
+    """
+    from .metrics import paired_bootstrap
+
+    rows, issues = [], []
+    for a, b in pairs:
+        seeds = sorted(set(per_user[a]) & set(per_user[b]))
+        if set(per_user[a]) != set(per_user[b]):
+            issues.append(f"{a} vs {b}: seed 집합이 다름 → 공통 seed {seeds}만 사용")
+        for s in seeds:
+            ua, ub = per_user[a][s], per_user[b][s]
+            if set(ua.index) != set(ub.index):
+                issues.append(f"{a} vs {b} seed {s}: 평가 사용자 집합이 다름 → 공통 사용자만 사용")
+            for m in metrics:
+                r = paired_bootstrap(ua[m], ub[m], n_boot=n_boot, seed=s)
+                rows.append({"a": a, "b": b, "metric": m, "seed": s, **r})
+    detail = pd.DataFrame(rows)
+
+    summary = []
+    for (a, b, m), g in detail.groupby(["a", "b", "metric"], sort=False):
+        summary.append({
+            "a": a, "b": b, "metric": m, "diff_mean": g["diff"].mean(),
+            "ci_low_min": g["ci_low"].min(), "ci_high_max": g["ci_high"].max(),
+            "n_significant": int(g["significant"].sum()), "n_seeds": len(g),
+            "verdict": verdict(list(g["ci_low"]), list(g["ci_high"]), a, b),
+        })
+    return detail, pd.DataFrame(summary), issues
+
+
+def bootstrap_markdown(summary: pd.DataFrame, decimals: int = 4) -> str:
+    header = ["Comparison (A − B)", "Metric", "Δ mean", "seed별 95% CI 범위", "유의한 seed", "판정"]
+    lines = ["| " + " | ".join(header) + " |", "|" + " --- |" * len(header)]
+    for _, r in summary.iterrows():
+        d = decimals
+        lines.append("| " + " | ".join([
+            f"{r['a']} − {r['b']}", {"ndcg": "NDCG", "recall": "Recall"}.get(r["metric"], r["metric"]),
+            f"{r['diff_mean']:+.{d}f}", f"[{r['ci_low_min']:+.{d}f}, {r['ci_high_max']:+.{d}f}]",
+            f"{r['n_significant']}/{r['n_seeds']}", r["verdict"],
+        ]) + " |")
+    return "\n".join(lines)

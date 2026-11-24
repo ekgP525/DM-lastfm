@@ -26,12 +26,13 @@ scripts/
   run_experiment.py    방법 × seed 실행 → results/metrics_*.json, per_user_*.csv
   tune.py              seed 0 validation 그리드 탐색 → results/tune_*.csv
   make_tables.py       방법 간 비교 표(평균 ± 표준편차) → results/tables/compare_{val,test}.{md,csv}
+  bootstrap_table.py   방법 간 차이의 seed별 paired bootstrap 95% CI → results/tables/bootstrap_*.{md,csv}
 src/lastfm_rec/
   data.py              로딩, log(1+plays), 사용자 필터, ID 인코딩, 친구·태그 인코딩
   split.py             사용자별 train/val/test 분할(seed 고정)
   graph.py             학습 데이터만으로 RWR 그래프 구성(G1/G2/G3), 전이 행렬
   metrics.py           Recall@K, NDCG@K, coverage, 평균 인기도, tail 비율, paired bootstrap
-  tables.py            metrics_*.json → 비교 표, 실행 조건(K, seed, 평가 사용자 수) 일치 확인
+  tables.py            비교 표, 실행 조건(K, seed, 평가 사용자 수) 확인, bootstrap 쌍 비교·판정
   models/
     base.py            Recommender 인터페이스(fit, score, recommend)
     baselines.py       인기도 순, 무작위
@@ -131,6 +132,9 @@ python scripts/run_experiment.py --method mf --stage val --params '{"n_factors":
 ```bash
 # 방법 간 비교 표: 이름=결과 파일 이름(metrics_<이름>_<stage>.json). 없는 파일은 건너뜀
 python scripts/make_tables.py --stage val --runs Random=random Popularity=popularity MF=mf_final
+
+# 방법 간 차이: seed마다 사용자 단위 paired bootstrap 95% CI. 모든 seed가 같은 방향일 때만 차이로 판정
+python scripts/bootstrap_table.py --stage test --runs Popularity=popularity MF=mf_final RWR=rwr_final --pairs MF:Popularity RWR:MF
 ```
 
 - 그림 생성 순서는 구현 완료 후 기재
