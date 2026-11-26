@@ -22,9 +22,6 @@ class ItemCF(Recommender):
 
     def fit(self, fit_df, n_users, n_items):
         super().fit(fit_df, n_users, n_items)
-        if self.neighbor_fn is not None:
-            raise NotImplementedError("MinHash-LSH 근사 이웃은 feat/chaeyeon/minhash-lsh에서 구현")
-
         # 1) 사용자×아티스트 행렬 X. 값은 w = log(1 + plays), fit_df(학습 부분)만 사용
         u = fit_df["u"].to_numpy(dtype=np.int64)
         i = fit_df["i"].to_numpy(dtype=np.int64)
@@ -35,13 +32,30 @@ class ItemCF(Recommender):
         norms = np.sqrt(np.asarray(self.X.power(2).sum(axis=0)).ravel())
         inv = np.divide(1.0, norms, out=np.zeros_like(norms), where=norms > 0)
         Xn = (self.X @ sp.diags(inv)).tocsc()
-        sim = (Xn.T @ Xn).tocsr()
+        if self.neighbor_fn is None:
+            sim = (Xn.T @ Xn).tocsr()
+        else:
+            pairs = self.neighbor_fn(fit_df, n_items)
+            sim = self._pair_cosine(Xn, pairs, n_items)
+            self.n_candidate_pairs = len(pairs)
         sim.setdiag(0.0)
         sim.eliminate_zeros()
 
         # 3) 아티스트마다 유사도 상위 n_neighbors개만 남긴다. S[i, j] = i의 이웃 j의 유사도
         self.S = self._keep_top_k(sim, self.n_neighbors)
         return self
+
+    @staticmethod
+    def _pair_cosine(Xn, pairs, n_items):
+        """후보 쌍 (i, j)의 코사인만 계산해 대칭 희소 행렬로 돌려준다. 후보가 아닌 쌍은 0(이웃 아님)."""
+        if len(pairs) == 0:
+            return sp.csr_matrix((n_items, n_items))
+        XnT = Xn.T.tocsr()
+        pi, pj = pairs[:, 0], pairs[:, 1]
+        vals = np.asarray(XnT[pi].multiply(XnT[pj]).sum(axis=1)).ravel()
+        rows = np.concatenate([pi, pj])
+        cols = np.concatenate([pj, pi])
+        return sp.csr_matrix((np.concatenate([vals, vals]), (rows, cols)), shape=(n_items, n_items))
 
     @staticmethod
     def _keep_top_k(sim, k):
@@ -74,11 +88,56 @@ class MinHashLSH:
     candidates()는 아티스트별 후보 이웃 인덱스를 돌려주고 ItemCF(neighbor_fn=...)에 넘긴다.
     기록할 것: 정확한 top-k 이웃 대비 recall, 이웃 계산 시간, 청취자 1명 아티스트 처리 방식."""
 
+    P = 2_147_483_647
+
     def __init__(self, b: int = 20, r: int = 5, seed: int = 0):
         self.b, self.r, self.seed = b, r, seed
+        self.n_hash = b * r
+
+    def signatures(self, fit_df, n_items):
+        """(n_hash, n_items) MinHash 시그니처. 학습 청취자가 없는 아티스트 열은 -1.
+        h_k(u) = (a_k * u + c_k) mod P 를 순열 대신 쓰고, 아티스트별로 청취자 해시값의 최솟값을 취한다."""
+        rng = np.random.default_rng(self.seed)
+        a = rng.integers(1, self.P, self.n_hash, dtype=np.int64)
+        c = rng.integers(0, self.P, self.n_hash, dtype=np.int64)
+
+        # (아티스트, 사용자) 쌍을 중복 없이 아티스트 순으로 정렬 → 아티스트마다 청취자가 연속 구간
+        pairs = np.unique(np.stack([fit_df["i"].to_numpy(np.int64),
+                                    fit_df["u"].to_numpy(np.int64)], axis=1), axis=0)
+        items, users = pairs[:, 0], pairs[:, 1]
+        starts = np.flatnonzero(np.r_[True, items[1:] != items[:-1]])
+
+        sig = np.full((self.n_hash, n_items), -1, dtype=np.int64)
+        for s in range(0, self.n_hash, 32):
+            H = (a[s:s + 32, None] * users[None, :] + c[s:s + 32, None]) % self.P
+            sig[s:s + 32, items[starts]] = np.minimum.reduceat(H, starts, axis=1)
+        self.has_listener = np.zeros(n_items, dtype=bool)
+        self.has_listener[items[starts]] = True
+        return sig
 
     def candidates(self, fit_df, n_items):
-        raise NotImplementedError("행렬 담당")
+        """banding 후보 쌍. (후보 쌍 수, 2) int 배열, 각 행은 i < j인 (i, j), 중복 없음.
+        어느 band 하나에서라도 r행이 모두 같은 아티스트끼리 후보가 된다.
+        학습 청취자가 없는 아티스트(시그니처 -1)는 후보에서 뺀다."""
+        sig = self.signatures(fit_df, n_items)
+        active = np.flatnonzero(self.has_listener)
+        keys = []
+        for band in range(self.b):
+            rows = sig[band * self.r:(band + 1) * self.r][:, active]
+            # r칸이 완전히 같은 열끼리 같은 버킷 번호 받음
+            _, bucket = np.unique(rows.T, axis=0, return_inverse=True)
+            bucket = bucket.ravel()
+            order = np.argsort(bucket, kind="stable")
+            sb = bucket[order]
+            starts = np.flatnonzero(np.r_[True, sb[1:] != sb[:-1]])
+            sizes = np.diff(np.r_[starts, len(sb)])
+            # 버킷에 2명 이상 있으면 그 안의 모든 쌍이 후보
+            for st, size in zip(starts[sizes > 1], sizes[sizes > 1]):
+                members = active[order[st:st + size]]
+                a, b = np.triu_indices(size, k=1)
+                keys.append(members[a] * n_items + members[b])
+        keys = np.unique(np.concatenate(keys)) if keys else np.empty(0, np.int64)
+        return np.stack([keys // n_items, keys % n_items], axis=1)
 
 
 class MF(Recommender):
