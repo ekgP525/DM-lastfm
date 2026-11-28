@@ -94,7 +94,19 @@ def test_recommend_excludes_seen(toy):
         assert len(items) == 10 and not (set(items) & seen[u])
 
 
-def test_neighbor_fn_not_supported_yet(toy):
+def test_neighbor_fn_all_pairs_equals_exact(toy):
+    # 모든 쌍을 후보로 주면 정확한 Item-CF와 유사도가 같다 (이웃을 자르지 않는 k에서 비교)
     inter, n_users, n_items = toy
-    with pytest.raises(NotImplementedError):
-        ItemCF(neighbor_fn=lambda *a: None).fit(inter, n_users, n_items)
+    tr = split_per_user(inter, seed=0).train
+    pairs = np.array([(i, j) for i in range(n_items) for j in range(i + 1, n_items)])
+    exact = ItemCF(n_neighbors=n_items).fit(tr, n_users, n_items)
+    approx = ItemCF(n_neighbors=n_items, neighbor_fn=lambda f, n: pairs).fit(tr, n_users, n_items)
+    assert np.allclose(exact.S.toarray(), approx.S.toarray())
+
+
+def test_neighbor_fn_no_candidates_means_no_neighbors(toy):
+    # 후보가 하나도 없으면 이웃도 없다 (후보 밖 쌍은 유사도를 계산하지 않음)
+    inter, n_users, n_items = toy
+    tr = split_per_user(inter, seed=0).train
+    m = ItemCF(n_neighbors=K, neighbor_fn=lambda f, n: np.empty((0, 2), dtype=np.int64)).fit(tr, n_users, n_items)
+    assert m.S.nnz == 0

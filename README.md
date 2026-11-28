@@ -27,6 +27,8 @@ scripts/
   tune.py              seed 0 validation 그리드 탐색 → results/tune_*.csv
   make_tables.py       방법 간 비교 표(평균 ± 표준편차) → results/tables/compare_{val,test}.{md,csv}
   bootstrap_table.py   방법 간 차이의 seed별 paired bootstrap 95% CI → results/tables/bootstrap_*.{md,csv}
+  lsh_sweep.py         H3: MinHash-LSH (b, r) 탐색, 이웃 recall·후보 쌍 수·Recall@10 → results/lsh_sweep.csv
+  fig_lsh.py           그림 3(H3) → results/figures/fig3_lsh.{pdf,png}
 src/lastfm_rec/
   data.py              로딩, log(1+plays), 사용자 필터, ID 인코딩, 친구·태그 인코딩
   split.py             사용자별 train/val/test 분할(seed 고정)
@@ -36,7 +38,7 @@ src/lastfm_rec/
   models/
     base.py            Recommender 인터페이스(fit, score, recommend)
     baselines.py       인기도 순, 무작위
-    stubs.py           ItemCF(구현 완료), MinHashLSH, RWR (구현 예정), MF (구현 완료)
+    stubs.py           ItemCF(구현 완료), MinHashLSH(구현 완료), RWR (구현 예정), MF (구현 완료)
 tests/                 분할·leakage·지표 단위 테스트
 data/raw/              원본 데이터(커밋하지 않음)
 results/               실행 결과(커밋하지 않음)
@@ -88,6 +90,7 @@ python scripts/download_data.py   # data/raw/hetrec2011-lastfm-2k/, data/raw/ACC
 - RWR은 teleport 집합이 사용자 한 명인 Personalized PageRank와 같은 식
 - 인기도 보정(점수 ÷ (학습 청취자 수 + 1)^β)과 그래프 변형 G1~G3는 RWR의 변형·ablation이며 별도 알고리즘이 아님
 - Baseline: 인기도 순, 무작위
+- MinHash-LSH는 아티스트의 학습 청취자 집합(Jaccard)으로 후보 쌍만 고르고, 이웃 유사도는 Item-CF와 같은 log 가중 코사인을 후보 쌍에서만 계산. 학습 청취자가 없는 아티스트는 후보에서 제외
 
 ## Experiment commands / configurations
 
@@ -112,6 +115,7 @@ seed 0 validation NDCG@10(all) 최대 기준으로 고르고 나머지 seed에 �
 | --- | --- | --- |
 | MF | `{"n_factors": 256, "reg": 0.1, "neg_ratio": 12, "lr": 0.01, "epochs": 120}` | 1차(epochs 30): n_factors {16, 32, 64, 128} × reg {0.01, 0.05, 0.1} × neg_ratio {1, 3, 5} × lr {0.005, 0.01, 0.02}. 최적이 범위 끝이라 2차(lr 0.01): n_factors {128, 256} × reg {0.1, 0.2, 0.4} × neg_ratio {5, 8, 12}. epochs {20, 30, 50, 80, 120, 200}, epochs 120에서 reg {0.05, 0.1, 0.2} 재확인. 상위 조합 간 NDCG 차이(≤0.003)는 seed 하나의 변동 폭 수준 |
 | Item-CF | `{"n_neighbors": 2000}` | 1차: n_neighbors {5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 500, 1000}. 최적이 범위 끝이라 2차: {1000, 1500, 2000, 3000, 5000, 10000, 20000}. k ≥ 5000은 결과가 같음(유사도가 0이 아닌 이웃이 5000개 미만이라 자르지 않음). k=2000과 전체 사용의 차이 0.0003, seed 간 표준편차 0.0022 수준. k가 커질수록 coverage가 줄고 평균 인기도가 오름 |
+| Item-CF + MinHash-LSH (`itemcf_lsh`) | `{"n_neighbors": 2000, "b": 200, "r": 1}` | n_neighbors는 Item-CF 확정값. b {10, 20, 50, 100, 200} × r {1, 2, 3, 5}, seed 0 validation. 선택 기준(실험 전 고정): 정확한 top-2000 이웃 recall ≥ 0.9 중 후보 쌍 최소 → (200, 1), 이웃 recall 0.940, 후보 711,115쌍(공통 청취자가 있는 쌍의 93.6%). LSH 해시 seed = 분할 seed |
 
 ```bash
 python scripts/tune.py --method mf --tag _grid1 --grid '{"n_factors": [16, 32, 64, 128], "reg": [0.01, 0.05, 0.1], "neg_ratio": [1, 3, 5], "lr": [0.005, 0.01, 0.02]}'
@@ -122,6 +126,8 @@ python scripts/run_experiment.py --method mf --stage val --params '{"n_factors":
 python scripts/tune.py --method itemcf --tag _k1 --grid '{"n_neighbors": [5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 500, 1000]}'
 python scripts/tune.py --method itemcf --tag _k2 --grid '{"n_neighbors": [1000, 1500, 2000, 3000, 5000, 10000, 20000]}'
 python scripts/run_experiment.py --method itemcf --stage val --params '{"n_neighbors": 2000}' --tag _final
+python scripts/lsh_sweep.py --fixed '{"n_neighbors": 2000}' --b 10,20,50,100,200 --r 1,2,3,5
+python scripts/run_experiment.py --method itemcf_lsh --stage val --params '{"n_neighbors": 2000, "b": 200, "r": 1}' --tag _final
 ```
 
 ## Evaluation
@@ -139,6 +145,9 @@ python scripts/make_tables.py --stage val --runs Random=random Popularity=popula
 
 # 방법 간 차이: seed마다 사용자 단위 paired bootstrap 95% CI. 모든 seed가 같은 방향일 때만 차이로 판정
 python scripts/bootstrap_table.py --stage test --runs Popularity=popularity MF=mf_final RWR=rwr_final --pairs MF:Popularity RWR:MF
+
+# 그림 3 (H3): lsh_sweep.py 결과 CSV로 그림
+python scripts/fig_lsh.py
 ```
 
 - 그림 생성 순서는 구현 완료 후 기재
